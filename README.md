@@ -12,8 +12,8 @@ During the course, the students will learn to:
 - normalize the data
 - perform dimentionaly reduction
 - cluster the cells and identify marker genes
-- perform cell cycle and cell type annotation
-- integrate multiple samples
+- perform cell type annotation
+- integrate multiple samples, analyse inter sample variability and batch correct.
 - combine cells into pseudobulk and perform differential gene expression analysis with DEseq2
 
 # Flow of the course
