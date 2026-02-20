@@ -20,7 +20,7 @@ During the course, the students will learn to:
 
 The data will be made available on Github the Morning of the first day.
 
-- On Day 1 the students will follow a step by a step analysis workflow.
+- On day 1 the students will follow a step by a step analysis workflow.
 
 - On day 2, the students will analyse other samples (provided by the tutor) on their own using the workflow of the first day as a template and will integrate the samples together and study inter donor variability.
 
