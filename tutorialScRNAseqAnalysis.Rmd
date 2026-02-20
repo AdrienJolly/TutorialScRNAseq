@@ -1,0 +1,500 @@
+---
+title: "Single-Cell RNA-seq Analysis of Human PBMCs with Bioconductor"
+author: "Adrien Jolly"
+
+---
+
+# Overview
+
+In this practical, we will analyze a human PBMC dataset generated using the platform developed by 10x Genomics.
+
+The following steps will be performed sequencially:
+
+- Load raw count data
+- Identify and remove empty droplets
+- Perform quality control filtering
+- Normalize counts
+- Eliminate doublets
+- Model gene variance and perform feature selection
+- Perform PCA, UMAP and clustering and cluster annotation
+- Annotate cells using SingleR
+
+For the second day the students will be more independent in their analysis.
+
+the script covers specific approaches which the students will incorporate in their own code
+
+- data integration (scaling)
+- batch correction with fast MNN
+- pseudobulking and differential gene expression analysis with DEseq2.
+
+All analysis is performed using Bioconductor and the SingleCellExperiment framework (see https://bioconductor.org/books/release/OSCA/).
+
+---
+
+# Package Installation (Run Once)
+
+If you are using the provided Docker image, you can skip this section.
+
+Otherwise, run this chunk to install all required packages.
+
+```{r install_packages, eval=TRUE}
+# Check if BiocManager is installed
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
+# Install Bioconductor packages (only if missing)
+bioc_pkgs <- c(
+  "DropletUtils",
+  "SingleCellExperiment",
+  "scater",
+  "scran",
+  "bluster",
+  "batchelor",
+  "SingleR",
+  "celldex",
+  "DESeq2",
+  "edgeR",
+  "scDblFinder"
+  
+)
+
+for (pkg in bioc_pkgs) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    BiocManager::install(pkg, ask = FALSE, update = FALSE)
+  }
+}
+
+# Install CRAN packages (only if missing)
+cran_pkgs <- c("ggplot2", "patchwork")
+
+for (pkg in cran_pkgs) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg)
+  }
+}
+
+
+```
+
+---
+
+# Load Required Packages
+
+```{r setup, message=FALSE, warning=FALSE}
+library(DropletUtils)
+library(AnnotationHub)
+library(SingleCellExperiment)
+library(scater)
+library(scran)
+library(bluster)
+library(batchelor)
+library(ggplot2)
+library(patchwork)
+library(SingleR)
+library(celldex)
+library(DESeq2)
+library(edgeR)
+library(scDblFinder)
+```
+
+---
+
+# Load 10x Data
+
+The matrix contains UMI counts (not expression values).
+
+```{r}
+sce <- read10xCounts("sample_raw_feature_bc_matrix_1")
+sce
+```
+
+Inspect:
+
+- Rows = genes
+- Columns = barcoded droplets
+- Counts = UMI-collapsed molecule counts
+
+---
+
+# Identify Empty Droplets
+
+Empty droplets contain ambient RNA.
+
+We use the knee/elbow plot to determine a lower UMI cutoff.
+
+```{r}
+barcodeRanks <- barcodeRanks(counts(sce))
+
+plot(barcodeRanks$rank,
+     barcodeRanks$total,
+     log="xy",
+     xlab="Rank",
+     ylab="Total UMI count",
+     main="Barcode Rank Plot (Knee/Elbow)")
+abline(h=metadata(barcodeRanks)$knee, col="red")
+abline(h=metadata(barcodeRanks)$inflection, col="blue")
+```
+
+
+- Where is the elbow?
+- What UMI threshold would you choose?
+
+
+
+```{r}
+
+# set your own threshold
+umi_threshold <-  ##
+
+#how many cells do you have left?
+sce[, colSums(counts(sce)) > umi_threshold]
+
+
+
+  # Elbow method can be too restrictive,we'll use emptyDrops, established statistical method to remove empty droplets based on distance to ambient rnas
+  
+# compare elbow method result and to result from emptydrops
+
+e.out <- emptyDrops(counts(sce))
+
+sce[,which(e.out$FDR <= 0.001)]
+
+
+sce<- sce[,which(e.out$FDR <= 0.001)]
+
+
+```
+
+---
+
+# Per-Cell Quality Control
+
+We compute QC metrics. 
+first we calculate the percentage of mito high cells, due to mitochondrial degradation, apoptotic cells are expected to have a high % of mitochondrial RNA, we want to exclude these cells
+
+
+```{r}
+
+
+
+
+rownames(sce) <- uniquifyFeatureNames(
+    rowData(sce)$ID, rowData(sce)$Symbol)
+
+is.mito <-grepl("^MT-", rownames(sce))
+
+table(is.mito) #check number of mito genes
+
+sce <- addPerCellQC(sce, subsets=list(Mito=is.mito))
+
+library(scuttle)
+df <- perCellQCMetrics(sce, subsets=list(Mito=is.mito))
+summary(df$sum)
+
+
+ reasons <- perCellQCFilters(df,sub.fields="subsets_Mito_percent")
+ summary(reasons$discard)
+sce$discard <- reasons$discard
+
+```
+
+
+
+# Violin Plots for QC
+
+```{r}
+library(scater)
+gridExtra::grid.arrange(
+    plotColData(sce, y="sum", colour_by="discard") + scale_y_log10() + ggtitle("Total count"),
+    plotColData(sce, y="detected", colour_by="discard")
+        +scale_y_log10() + ggtitle("Detected features"),
+    plotColData(sce, y="subsets_Mito_percent", colour_by="discard")
+         + ggtitle("High Mito"),
+    ncol=3
+)
+
+```
+
+### are we happy with the proposed discarded cells?
+
+
+```{r}
+#if yes, let's remove them
+
+sce <- sce[,!reasons$discard]
+```
+
+---
+
+#  Normalization
+
+Counts depend on sequencing depth.
+
+We estimate size factors estimation by deconvolution and perform log transformation + library size 
+
+```{r}
+sce <- computeSumFactors(sce)
+sce <- logNormCounts(sce)
+```
+
+Check size factors:
+
+```{r}
+summary(sizeFactors(sce))
+```
+
+---
+
+# Variance Modeling and Feature Selection
+
+We expect most of the variation in gene expression between cells to be technical, driven in particular by sampling noise. Given the effect of sampling noise, we expect a relation between variance and mean, we model the trend to identify genes with bona fide biological variation
+
+```{r}
+dec <- modelGeneVar(sce)
+fit.default <- metadata(dec)
+plot(dec$mean,
+     dec$total,
+     pch=16,
+     cex=0.5,
+     xlab="Mean expression",
+     ylab="Total variance",
+     main="Mean-Variance Plot")
+curve(fit.default$trend(x), col="dodgerblue", add=TRUE, lwd=2)
+```
+
+Select highly variable genes:
+
+```{r}
+hvg <- getTopHVGs(dec, n=2000)
+
+
+```
+
+# Doublet identification
+
+a single droplet may erroneously capture more than one cell; these are called _doublets_. There are some statistical methods that can be used 
+
+To try and detect the doublets, we can use statistical algorithms, many of which are implemented in the `scDblFinder` package. We will focus on one technique that uses simulations to identify droplets that are likely to contain more than one cell.
+
+
+
+```{r}
+
+dbl.dens <- computeDoubletDensity(sce, subset.row=hvg, 
+    d=ncol(reducedDim(sce)))
+sce$DoubletScore <- dbl.dens
+summary(dbl.dens)
+```
+
+The function `computeDoubletDensity` identifies potential doublet cells based on the local density of simulated doublet expression profiles. 
+
+
+
+
+```{r}
+#quickly run UMAP to identify doublets (not the "final" UMAP)
+sce <- runUMAP(sce)
+plotUMAP(sce, colour_by="DoubletScore")
+```
+
+We can define a threshold to identify putative doublets.
+
+```{r}
+dbl.calls <- doubletThresholding(data.frame(score=dbl.dens),
+    method="griffiths", returnType="call")
+summary(dbl.calls)
+```
+
+And finally eliminate them from the dataset before continuing the analysis. 
+
+
+```{r}
+sce <- sce[, dbl.calls == "singlet"]
+sce
+```
+---
+
+# PCA
+
+Dimensionality reduction on selected features.
+
+```{r}
+sce <- runPCA(sce, subset_row=hvg)
+```
+
+For further analysis, we want to select a number of components which are informative and discard non informative PCs
+
+```{r}
+var_explained <- attr(reducedDim(sce, "PCA"), "percentVar")
+
+plot(var_explained,
+     type="b",
+     xlab="PC",
+     ylab="Percent variance explained",
+     main="Elbow Plot")
+```
+
+# Decide:
+
+How many PCs should we retain?
+
+```{r}
+n_pcs <-   # FILL
+set.seed(1001010)
+sce <- runUMAP(sce, dimred="PCA", ncomponents= "fill", n_dimred=n_pcs)
+```
+
+
+#  Clustering and marker detection
+
+We cluster with Louvain clustering
+
+```{r}
+
+
+clusters <- clusterRows(reducedDim(sce, "PCA"), NNGraphParam(cluster.fun="louvain",cluster.args=list(resolution=0.2)))
+sce$cluster <- factor(clusters)
+```
+
+Visualize:
+
+```{r}
+plotUMAP(sce, colour_by="cluster")
+```
+```{r}
+markers <- findMarkers(sce, sce$cluster)
+head(markers[[1]])
+```
+
+We can for instance extract the top 15 genes from each comparison to use as cluster-specific markers.
+
+```{r}
+mm <- unique(unlist(lapply(markers, function(x) rownames(x)[1:15])))
+
+plotGroupedHeatmap(sce, features=mm, group="cluster", center=TRUE)
+```
+
+#### at this point  you extract top 20 marker genes per cluster and check for pathway enrichment using online tools such as EnrichR or Chatgpt. try out multiple cluster
+
+
+
+
+
+
+# Cell Type Annotation with SingleR
+
+We use reference PBMC data.
+
+```{r}
+ref <- HumanPrimaryCellAtlasData()
+
+pred <- SingleR(test=sce,
+                ref=ref,
+                labels=ref$label.main)
+
+sce$celltype <- pred$labels
+```
+
+Plot annotation:
+
+```{r}
+plotUMAP(sce, colour_by="celltype")
+```
+save R object
+```{r}
+saveRDS(sce,"sceD1.rds")
+```
+
+#end of Day 1
+
+
+ On the second day, the students will first make their own .rmd scripts to analyse 2 other samples then the 3 samples will be combined and further analysis will be performed on the combined dataset.
+
+# data integration
+once you have generated multiple sce, you want to integrate the data of the 3 samples
+
+```{r}
+# keep only common genes
+common_genes <- Reduce(intersect,list(rownames(sce1),rownames(sce2),rownames(sce3)))
+                            
+                            
+sce1 <- sce1[common_genes, ]
+sce2 <- sce2[common_genes, ]
+sce3 <- sce3[common_genes, ]
+
+# rescale each sample to make the 3 comparable
+
+sce.list <- multiBatchNorm(sce1, sce2, sce3)
+
+sce.list[[1]]$donor <- "D1"
+sce.list[[2]]$donor <- "D2"
+sce.list[[3]]$donor <- "D3"
+
+sce.combined <- do.call(cbind, sce.list)
+
+table(sce.combined$donor)
+```
+
+# batch correction:
+
+in order to perform a single coherent clustering we may need to create a corrected dimensional reduction which eliminate the sample effect. 
+
+```{r}
+
+sce.mnn <- fastMNN(sce.list)
+reducedDim(sce.mnn, "corrected")
+reducedDim(sce.combined, "MNN") <- reducedDim(sce.mnn, "corrected")
+
+# we perform a UMAP using the corrected dimentionality reduction and check whether the donor effect is corrected.
+sce.combined <- runUMAP(
+    sce.combined,
+    dimred = "MNN"
+)
+
+plotUMAP(sce.combined, colour_by = "donor")
+
+```
+
+
+
+#  Create Pseudobulk Counts
+
+cells are not biological replicates, statistical tools to study differential gene expression between populations
+
+```{r}
+table(sce$donor)
+```
+
+Aggregate by donor and cell type:
+
+```{r}
+pseudo <- aggregateAcrossCells(
+  sce,
+  ids=DataFrame(donor=sce$donor,
+                celltype=sce$celltype)
+)
+```
+
+---
+
+#. Differential Expression with DESeq2
+
+We compare two conditions (fill appropriately).
+
+```{r}
+dds <- DESeqDataSetFromMatrix(
+  countData=assay(pseudo, "counts"),
+  colData=colData(pseudo),
+  design=~ condition
+)
+
+dds <- DESeq(dds)
+res <- results(dds)
+```
+
+Inspect:
+
+```{r}
+head(res[order(res$padj), ])
+```
