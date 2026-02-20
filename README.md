@@ -18,7 +18,7 @@ During the course, the students will learn to:
 
 # Flow of the course
 
-The data will be made available on the Morning of the first day.
+The data will be made available on Github the Morning of the first day.
 
 - On Day 1 the students will follow a step by a step analysis workflow.
 
