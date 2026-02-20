@@ -1,9 +1,9 @@
-# introduction
+# Introduction
 
 single cell RNA seq is used in fundamental and translational research to identify cell populations within a biological sample, infer the connections and relationships between these populations and identify the effects of experimental conditions on the transcriptome of these populations. 
 There are numerous pipelines and tools available to perform analysis of such data.  We will use the well established Bioconductor pipeline in R to perform full analysis of a human PBMC dataset starting from the raw count matrix.
 
-# objectives
+# Objectives
 
 During the course, the students will learn to:
 
@@ -15,6 +15,14 @@ During the course, the students will learn to:
 - perform cell cycle and cell type annotation
 - integrate multiple samples
 - combine cells into pseudobulk and perform differential gene expression analysis with DEseq2
+
+# Flow of the course
+
+The data will be made available on the Morning of the first day.
+
+- On Day 1 the students will follow a step by a step analysis workflow.
+
+- On day 2, the students will analyse other samples (provided by the tutor) on their own using the workflow of the first day as a template and will integrate the samples together and study inter donor variability.
 
 
   
