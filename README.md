@@ -28,7 +28,7 @@ The data will be made available on Github the Morning of the first day.
 
 # R installation (IMPORTANT)
 
-please install [R 4.5.2] (https://cran.rstudio.com/), [Rstudio](https://posit.co/download/rstudio-desktop/) prior to the course.
+please install [R 4.5.2](https://cran.rstudio.com/), and [Rstudio](https://posit.co/download/rstudio-desktop/) prior to the course.
 
-Windows user also need to install [Rtools45] (https://cran.r-project.org/bin/windows/Rtools/rtools45/rtools.html) to install some Bioconductor packages.
+Windows user also need to install [Rtools45](https://cran.r-project.org/bin/windows/Rtools/rtools45/rtools.html) to install some Bioconductor packages.
   
