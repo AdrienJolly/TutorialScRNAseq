@@ -1,0 +1,299 @@
+---
+title: "Single-Cell RNA-seq Analysis of Human PBMCs with Bioconductor- sample integration"
+author: "Adrien Jolly"
+
+---
+
+---
+
+# Load Required Packages
+
+```{r setup, message=FALSE, warning=FALSE}
+library(DropletUtils)
+library(AnnotationHub)
+library(SingleCellExperiment)
+library(scater)
+library(scran)
+library(bluster)
+library(batchelor)
+library(ggplot2)
+library(patchwork)
+library(SingleR)
+library(celldex)
+library(DESeq2)
+library(edgeR)
+library(scDblFinder)
+```
+
+---
+
+# Load 10x Data
+
+3 samples
+
+```{r}
+sce1=readRDS()
+  
+  
+```
+
+```{r}
+# loading the samples
+sce1 <- readRDS("~/Nextcloud2/Sampled_samples/sceD1.rds")
+
+sce2 <- readRDS("~/Nextcloud2/Sampled_samples/sceD2.rds")
+
+sce3 <- readRDS("~/Nextcloud2/Sampled_samples/sceD3.rds")
+
+
+
+
+
+```
+
+# now we combine the datasets
+```{r}
+
+
+# keep only common genes
+common_genes <- Reduce(intersect,list(rownames(sce1),rownames(sce2),rownames(sce3)))
+                            
+                            
+sce1 <- sce1[common_genes, ]
+sce2 <- sce2[common_genes, ]
+sce3 <- sce3[common_genes, ]
+
+
+#colData(sce1)=colData(sce1)[1:2]
+#colData(sce2)=colData(sce2)[1:2]
+#colData(sce3)=colData(sce3)[1:2]
+
+# exclude dimensionality reduction
+
+
+reducedDim(sce1,"PCA") <- NULL
+reducedDim(sce2,"PCA") <- NULL
+reducedDim(sce3,"PCA") <- NULL
+
+reducedDim(sce1,"UMAP") <- NULL
+reducedDim(sce2,"UMAP") <- NULL
+reducedDim(sce3,"UMAP") <- NULL
+
+#rescale everything 
+
+sce.list <- multiBatchNorm(sce1, sce2, sce3)
+
+#add information for each donor
+sce.list[[1]]$donor <- "D1"
+sce.list[[2]]$donor <- "D2"
+sce.list[[3]]$donor <- "D3"
+
+
+#check that cell annotation columns are the same
+setdiff(colnames(colData(sce1)),colnames(colData(sce2)))
+
+sce <- do.call(cbind, sce.list)
+
+table(sce$donor)
+```
+
+# model variance fo combined dataset
+```{r}
+dec <- modelGeneVar(sce)
+fit.default <- metadata(dec)
+plot(dec$mean,
+     dec$total,
+     pch=16,
+     cex=0.5,
+     xlab="Mean expression",
+     ylab="Total variance",
+     main="Mean-Variance Plot")
+curve(fit.default$trend(x), col="dodgerblue", add=TRUE, lwd=2)
+```
+
+# get top Highly variable Genes
+
+```{r}
+hvg <- getTopHVGs(dec, n=2000)
+
+head(hvg)
+
+```
+
+# PCA
+
+Dimensionality reduction on selected features.
+
+```{r}
+sce <- runPCA(sce, subset_row=hvg)
+
+```
+
+For further analysis, we want to select a number of components which are informative and discard non informative PCs
+
+```{r}
+var_explained <- attr(reducedDim(sce, "PCA"), "percentVar")
+
+plot(var_explained,
+     type="b",
+     xlab="PC",
+     ylab="Percent variance explained",
+     main="Elbow Plot")
+```
+
+#run UMAP
+```{r}
+
+set.seed(1001010) # initialize UMAP (for reproducibility)
+sce <- runUMAP(sce, dimred="PCA", n_dimred=6)
+```
+
+
+
+#visualize based on manual annotation of single samples
+
+```{r}
+plotUMAP(sce, colour_by="Initannot")
+```
+
+
+
+#marker genes per cluster identification
+```{r}
+markers <- findMarkers(sce, sce$clustersCorrected)
+
+
+FDRclust6=markers[[6]]$FDR
+
+length(which(FDRclust6<0.05))
+
+
+
+markersClust2=markers[[2]]
+
+#markers for a given cluster will have high summary log2FC
+
+topClust2=markersClust2[order(markersClust2$summary.logFC,decreasing=TRUE),]
+
+
+
+rownames(topClust2)[1:30]
+
+
+
+
+```
+
+
+# batch correction:
+
+in order to perform a single coherent clustering we may need to create a corrected dimensional reduction which eliminate the sample effect. 
+
+```{r}
+
+#we batch correct using fastMNN
+sce.mnn <- fastMNN(sce.list,d = 6)
+reducedDim(sce.mnn, "corrected")
+reducedDim(sce, "MNN") <- reducedDim(sce.mnn, "corrected")
+
+# we perform a UMAP using the corrected dimensionality reduction and check whether the donor effect is corrected.
+sce <- runUMAP(
+    sce,
+    dimred = "MNN"
+)
+
+plotUMAP(sce, colour_by = "donor",point_size=0.5)
+
+```
+
+
+
+#  Clustering and marker detection
+ 
+ we now recluster based on MNN corrected factors
+
+```{r}
+
+
+clustersCorrected <- clusterRows(reducedDim(sce, "MNN")[,1:6], NNGraphParam(cluster.fun="louvain",cluster.args=list(resolution=0.2)))
+sce$clustersCorrected <- factor(clustersCorrected)
+
+```
+
+#Visualize corrected clusters
+
+```{r}
+plotUMAP(sce, colour_by="clustersCorrected")
+```
+
+#check the proportion of cells of each patient per cluster
+
+```{r}
+
+# table of cells per patient, and per cluster
+CLusterPerDonor <- table(sce$clustersCorrected,sce$donor)
+
+
+# % of cells of each patient per cluster
+props <- prop.table(CLusterPerDonor, margin = 1)
+
+#plotting the proportion with a heatmap
+library(pheatmap)
+
+pheatmap(props,cluster_rows = FALSE, cluster_cols = FALSE,ylim=c(0,1))
+
+```
+
+#  Create Pseudobulk Counts
+
+cells are not biological replicates, statistical tools to study differential gene expression between populations
+
+```{r}
+table(sce$donor)
+```
+
+#Aggregate by donor and new clusters (clustersCorrected) (generated from combined dataset) to create a single cell experiment with nrow= n genes and ncol = (n donors * m clusters). 
+
+```{r}
+
+#The function sums raw cell counts within groups specified by the user
+pseudo <- aggregateAcrossCells(
+  sce,
+  ids=DataFrame(donor=sce$donor,
+                cluster=sce$clustersCorrected)
+)
+```
+
+---
+
+#. Differential Expression with DESeq2
+
+#We perform differential gene expression between clusters using DESeq. A tool using generalized linear models to test whether a specific factor (like cluster, batch effect..) affect the expression of given genes.
+
+```{r}
+
+clustvalue = pseudo$clustersCorrected
+colData(pseudo) = NULL
+colData(pseudo) <- asclustvalue
+
+# we create the DESeq2 object with the raw count matrix (DESeq handles normalization internally), and colData (annotations at the level of the pseudobulk). the "design" option specifies the linear model, in this case we set the set out that gene expression is only affected by the cluster (clustersCorrected). 
+dds <- DESeqDataSetFromMatrix(
+  countData=assay(pseudo, "counts"),
+  colData=colData(pseudo),
+  design=~clustersCorrected
+)
+
+colData(dds)=colData(dds)[16]
+
+dds <- DESeq(dds)
+res <- results(dds)
+
+```
+
+Inspect:
+
+```{r}
+head(res[order(res$padj), ])
+
+
+```
