@@ -31,11 +31,6 @@ library(scDblFinder)
 
 3 samples
 
-```{r}
-sce1=readRDS()
-  
-  
-```
 
 ```{r}
 # loading the samples
@@ -63,13 +58,13 @@ sce1 <- sce1[common_genes, ]
 sce2 <- sce2[common_genes, ]
 sce3 <- sce3[common_genes, ]
 
+#if necessary, we can remove some columns which do not match between samples
 
 #colData(sce1)=colData(sce1)[1:2]
 #colData(sce2)=colData(sce2)[1:2]
 #colData(sce3)=colData(sce3)[1:2]
 
-# exclude dimensionality reduction
-
+# exclude dimensional reduction which we will generate again
 
 reducedDim(sce1,"PCA") <- NULL
 reducedDim(sce2,"PCA") <- NULL
@@ -272,9 +267,6 @@ pseudo <- aggregateAcrossCells(
 
 ```{r}
 
-clustvalue = pseudo$clustersCorrected
-colData(pseudo) = NULL
-colData(pseudo) <- asclustvalue
 
 # we create the DESeq2 object with the raw count matrix (DESeq handles normalization internally), and colData (annotations at the level of the pseudobulk). the "design" option specifies the linear model, in this case we set the set out that gene expression is only affected by the cluster (clustersCorrected). 
 dds <- DESeqDataSetFromMatrix(
@@ -283,17 +275,51 @@ dds <- DESeqDataSetFromMatrix(
   design=~clustersCorrected
 )
 
-colData(dds)=colData(dds)[16]
+#keep exclusively column of interest (since the column were generated from the column of the single cell experiments most of them are now meaningless at bulk level)
+colData(dds) <- colData(dds)[16]
 
 dds <- DESeq(dds)
-res <- results(dds)
+res <- results(dds,contrast=c("clustersCorrected","1","2"))
 
 ```
 
-Inspect:
+generate volcano plot:
 
 ```{r}
-head(res[order(res$padj), ])
+
+DifExpr <- as.matrix(res[order(res$padj),])
+
+DifExpr <- DifExpr[which(DifExpr[,"padj"]<0.05),]
+
+markers <- rownames(DifExpr[which(abs(DifExpr[,"log2FoldChange"])>=0.5&DifExpr[,"padj"]<=0.0001),])
+
+#make volcano plot
+plotold <- EnhancedVolcano(res, 
+                rownames(res),
+                x ="log2FoldChange", 
+                y ="padj",
+                selectLab=markers,
+                max.overlaps = Inf,
+                xlab = bquote(~Log[2]~ 'fold change'),
+                pCutoff = 0.05,
+                FCcutoff = 0.5,
+                pointSize = 5.0,
+                labSize = 4.0,
+                labCol = 'black',
+                boxedLabels = TRUE,
+                colAlpha = 4/5,
+                legendPosition = 'right',
+                legendLabSize = 14,
+                legendIconSize = 4.0,
+                drawConnectors = TRUE,
+                widthConnectors = 0.75,
+                colConnectors = 'black',
+                title="cluster x vs cluster y - comp",
+                subtitle="FDR<=0.05, Absolute FC>=0.5",
+                gridlines.major = FALSE,
+                gridlines.minor = FALSE,
+                xlim=c(-3,5)
+)
 
 
 ```
