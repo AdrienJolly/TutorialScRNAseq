@@ -34,20 +34,32 @@ library(scDblFinder)
 
 ```{r}
 # loading the samples
-sce1 <- readRDS("~/Nextcloud2/Sampled_samples/sceD1.rds")
+sce1 <- readRDS("~/Nextcloud2/TutorialSingleCellRNAseq/tutorial2602/sce1.rds")
 
-sce2 <- readRDS("~/Nextcloud2/Sampled_samples/sceD2.rds")
+sce2 <- readRDS("~/Nextcloud2/TutorialSingleCellRNAseq/tutorial2602/sce2.rds")
 
-sce3 <- readRDS("~/Nextcloud2/Sampled_samples/sceD3.rds")
+sce3 <- readRDS("~/Nextcloud2/TutorialSingleCellRNAseq/tutorial2602/sce3.rds")
 
+saveRDS(sce,"scecombined2702.rds")
 
-
-
+sce=readRDS("scecombined2702.rds")
 
 ```
 
 # now we combine the datasets
 ```{r}
+ctsce1= sce1$celltype
+ctsce2= sce2$celltype
+ctsce3= sce3$celltype
+
+
+colData(sce1)=colData(sce1)[1:2]
+colData(sce2)=colData(sce2)[1:2]
+colData(sce3)=colData(sce3)[1:2]
+
+sce1$celltype = ctsce1
+sce2$celltype = ctsce2
+sce3$celltype = ctsce3
 
 
 # keep only common genes
@@ -140,7 +152,7 @@ plot(var_explained,
 ```{r}
 
 set.seed(1001010) # initialize UMAP (for reproducibility)
-sce <- runUMAP(sce, dimred="PCA", n_dimred=6)
+sce <- runUMAP(sce, dimred="PCA", n_dimred=7)
 ```
 
 
@@ -148,7 +160,7 @@ sce <- runUMAP(sce, dimred="PCA", n_dimred=6)
 #visualize based on manual annotation of single samples
 
 ```{r}
-plotUMAP(sce, colour_by="Initannot")
+plotUMAP(sce, colour_by="donor",point_size=0.3)
 ```
 
 
@@ -276,9 +288,12 @@ dds <- DESeqDataSetFromMatrix(
 )
 
 #keep exclusively column of interest (since the column were generated from the column of the single cell experiments most of them are now meaningless at bulk level)
-colData(dds) <- colData(dds)[16]
+colData(dds) <- colData(dds)[6]
+
+
 
 dds <- DESeq(dds)
+#compare expression in cluster 1 vs cluster 2.
 res <- results(dds,contrast=c("clustersCorrected","1","2"))
 
 ```
@@ -291,10 +306,10 @@ DifExpr <- as.matrix(res[order(res$padj),])
 
 DifExpr <- DifExpr[which(DifExpr[,"padj"]<0.05),]
 
-markers <- rownames(DifExpr[which(abs(DifExpr[,"log2FoldChange"])>=0.5&DifExpr[,"padj"]<=0.0001),])
+markers <- rownames(DifExpr[which(abs(DifExpr[,"log2FoldChange"])>=5&DifExpr[,"padj"]<=0.0001),])
 
-#make volcano plot
-plotold <- EnhancedVolcano(res, 
+
+p <- EnhancedVolcano(res, 
                 rownames(res),
                 x ="log2FoldChange", 
                 y ="padj",
@@ -303,7 +318,7 @@ plotold <- EnhancedVolcano(res,
                 xlab = bquote(~Log[2]~ 'fold change'),
                 pCutoff = 0.05,
                 FCcutoff = 0.5,
-                pointSize = 5.0,
+                pointSize = 1.0,
                 labSize = 4.0,
                 labCol = 'black',
                 boxedLabels = TRUE,
@@ -321,5 +336,7 @@ plotold <- EnhancedVolcano(res,
                 xlim=c(-3,5)
 )
 
+p
+ggsave("EnhancedVolcano.pdf", plot = p, width = 8, height = 6)
 
 ```
