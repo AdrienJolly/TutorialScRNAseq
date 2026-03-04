@@ -55,8 +55,8 @@ bioc_pkgs <- c(
   "celldex",
   "DESeq2",
   "edgeR",
-  "scDblFinder"
-  
+  "scDblFinder",
+  "EnhancedVolcano"
 )
 
 for (pkg in bioc_pkgs) {
